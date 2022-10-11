@@ -1,6 +1,5 @@
 #Finds Distance estimates for a specified cluster
 #Error propigation via taylor approximation (assuming symettric gaussian errors)
-    #TODO: Correct Spectroscopic parallax distance estimate
     #TODO: add cepheid PL(C) distance estimate
     #TODO: get virial mass
     
@@ -38,8 +37,8 @@ def main():
     #Set size of region for variable extinction analysis (box with side length regSize, in degrees)
     regSize = 3
     #Choose GAIA CSV input file name
-    GAIAname = "pleiadesGaia.csv"
-    SIMBADname = "pleiadesSim.csv"
+    GAIAname = "hyadesGaia.csv"
+    SIMBADname = "hyadesSim.csv"
 #----------SET USER PARAMETERS HERE---------
 
 
@@ -135,8 +134,17 @@ def main():
     data["V_gaia"] = data["phot_g_mean_mag"] + .02704 - .01424*(data["bp-rp"]) + 0.2156*(data["bp-rp"])**2 - 0.01426*(data["bp-rp"])**3
     data["R_gaia"] = data["phot_g_mean_mag"] + .02275 - .3961*(data["bp-rp"]) + 0.1243*(data["bp-rp"])**2 + 0.01396*(data["bp-rp"])**3
     data["(V-R)_gaia"] = data['V_gaia'] - data['R_gaia']
-    
+        #use gaia gspphot data to get V_rel_gspphot from extinction and absolute magnitude
+    data["V_ext_gspphot"] = data["ag_gspphot"] + .02704 - .01424*(data["bp-rp"]) + 0.2156*(data["bp-rp"])**2 - 0.01426*(data["bp-rp"])**3
+        #.03 error from estimated error in conversion (per source), since error in bp/rp magnitudes only available for their fluxes
+    data['err_V_ext_gspphot'] = np.sqrt( ((data['ag_gspphot_upper'] - data['ag_gspphot_lower'])/2)**2 + .03**2)
+        #get V_intr_gspphot
+    data["V_intr_gspphot"] = data["mg_gspphot"] + .02704 - .01424*(data["bp-rp"]) + 0.2156*(data["bp-rp"])**2 - 0.01426*(data["bp-rp"])**3
+        #.03 error from estimated error in conversion (per source), since error in bp/rp magnitudes only available for their fluxes
+    data['err_V_intr_gspphot'] = np.sqrt( ((data['mg_gspphot_upper'] - data['mg_gspphot_lower'])/2)**2 + .03**2)
+
     #plot both V magnitudes
+        #shows good agreement
     plt.figure()
     plt.title("V magnitudes")
     plt.xlabel("V_simbad [Mag]")
@@ -240,8 +248,30 @@ def main():
     plt.legend()
     plt.show()
 
+    #plot both relative V magnitudes
+        #shows good agreement
+    plt.figure()
+    plt.title("Relative V magnitudes")
+    plt.xlabel("V_simbad [Mag]")
+    plt.ylabel("V_gaia_gspphot [Mag]")
+    plt.scatter(data["V_rel"],data['V_app'] - data["V_ext_gspphot"])
+    lp = np.linspace(min(data['V_rel']),max(data['V_rel']),1000)
+    plt.plot(lp,lp)
+    plt.show()
+
+    #plot both absolute V magnitudes
+        #shows okay agreement, TODO: investigate discrepancy
+    plt.figure()
+    plt.title("Absolute V magnitudes")
+    plt.xlabel("V_spec [Mag]")
+    plt.ylabel("V_gaia_gspphot [Mag]")
+    plt.scatter(data["V_intr"],data['V_intr_gspphot'])
+    lp = np.linspace(min(data['V_intr']),max(data['V_intr']),1000)
+    plt.plot(lp,lp)
+    plt.show()
+
     #Get individual spectroscopic parallax distance
-    data["dist_spec_parallax"] = ((data["V_rel"] - data["V_intr"] + 5)/5)**10
+    data["dist_spec_parallax"] = 10**((data['V_rel'] - data["V_intr"] + 5)/5)
     data["err_dist_spec_parallax"] = np.log(10) * (1/5) * data["dist_spec_parallax"] * np.sqrt(data["err_V_rel"]**2 + data["err_V_intr"]**2)
 
     #Check for biased spec parallax distances
@@ -268,8 +298,8 @@ def main():
     dist_trigParallax = stat.mean(data["dist_trig_parallax"])
     err_dist_trigParallax = np.sqrt(np.sum((data["err_dist_trig_parallax"]**2))) / data.shape[0]
         #spec parallax
-    dist_specParallax = ((stat.mean(data["V_rel"] - data["V_intr"]) + 5)/5)**10
-    err_dist_specParallax = np.log(10) * (1/5) * dist_specParallax * np.sqrt(np.sum(data["err_V_rel"]**2 + data["err_V_intr"]**2))/data.shape[0]
+    dist_specParallax = stat.mean(data["dist_spec_parallax"])
+    err_dist_specParallax = np.sqrt(np.sum((data["err_dist_spec_parallax"]**2))) / data.shape[0]
         #print
     print("Trig Parallax: " + str(sciRound(dist_trigParallax,err_dist_trigParallax)) + " pc")
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")

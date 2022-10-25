@@ -1,16 +1,12 @@
 #Finds Distance estimates for a specified cluster
 #Error propigation via taylor approximation (assuming symettric gaussian errors)
-    #TODO: add cepheid PL(C) distance estimate
-    #TODO: get virial mass
-    
     #TODO: treat gaia and simbad data seperately for more data points?
-    #TODO: add pipeline for queries
+    #TODO: add pipeline for queries?
 
-    #TODO: get better metallicity source
+    #TODO: add better cluster membership filtering with algorithms
+    #TODO: add cepheid PL(C) distance estimate
     #TODO: add ZAMS MS fit
     #TODO: add isochrone fit, also get age
-    #TODO: add better cluster membership filtering with algorithms
-
 
 #Imports
 from ssl import PEM_cert_to_DER_cert
@@ -19,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
-from scipy import spatial
+from scipy import spatial as spat
 from scipy import stats as stats_sci
 import statistics as stat
 import sys
@@ -35,7 +31,7 @@ def main():
     #Set z-score for pm exclusion
     z=1
     #Set size of region for variable extinction analysis (box with side length regSize, in degrees)
-    regSize = 3
+    regSize = 360
     #Choose GAIA CSV input file name
     GAIAname = "hyadesGaia.csv"
     SIMBADname = "hyadesSim.csv"
@@ -92,6 +88,10 @@ def main():
     plt.ylabel("Dec [degrees]")
     plt.legend()
     plt.show()
+    
+    #virial thm
+    gaia_mems = getMems(gaia,z)
+    mass_gaia, radius_gaia = virial(gaia_mems)
 
     #Join gaia and simbad data
     data = coordMatch(gaia,simbad)
@@ -101,9 +101,9 @@ def main():
     
     #Plot proper motions with z std circled
     plt.figure()
-    plt.title("PMs of Cluster and Field")
-    plt.xlabel("PM RA [units?]")
-    plt.ylabel("PM Dec [units?]")
+    plt.title("Proper Motions")
+    plt.xlabel("PM RA [mas/yr]")
+    plt.ylabel("PM Dec [mas/yr]")
     plt.scatter(data["pmra"],data["pmdec"])
     ra_mean = stat.mean(data["pmra"])
     dec_mean = stat.mean(data["pmdec"])
@@ -272,7 +272,7 @@ def main():
 
     #Get individual spectroscopic parallax distance
     data["dist_spec_parallax"] = 10**((data['V_rel'] - data["V_intr"] + 5)/5)
-    data["err_dist_spec_parallax"] = np.log(10) * (1/5) * data["dist_spec_parallax"] * np.sqrt(data["err_V_rel"]**2 + data["err_V_intr"]**2)
+    data["err_dist_spec_parallax"] = .25*data['dist_spec_parallax'] #per Tsvetkov et al. paper, propigated to average
 
     #Check for biased spec parallax distances
     plt.figure()
@@ -305,7 +305,10 @@ def main():
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")
     print("Spec Parallax " + str(sciRound(dist_specParallax,err_dist_specParallax)) + " pc")
 
-
+    #virial thm
+    mass_both, radius_gaia = virial(data,force_radius=radius_gaia)
+    print('Mass =', figRound(mass_both),'solar masses')
+    print('Radius =', figRound(radius_gaia), 'pc')
 
 #Returns pandas dataframe by removing z-std outliers (for proper motion and parallax)
 def getMems(stars,z):
@@ -459,11 +462,57 @@ def getSpecParams(frame):
         #get intrinsic/tabulated values
             #also deal with edge of arrays: I use np.sign to check if index=0 or if index>0 because lambda doesn't support elif
     frame["V_intr"] = frame["spec_type"].map(lambda x: tabV[x])
-    frame["err_V_intr"] = frame["spec_type"].map(lambda x: .5) #per Tsvetkov et al. paper, 
+    frame["err_V_intr"] = frame["spec_type"].map(lambda x: .5) #per Tsvetkov et al. paper 
     frame["(B-V)_intr"] = frame["spec_type"].map(lambda x: tabB_V[x])
     frame["err_(B-V)_intr"] = frame["spec_type"].map(lambda x: .03) #approx difference between Tsvetkov et al. and FitxGerald colors
 
     return frame
+
+#get radius and virial mass
+def virial(df,force_radius=0):
+    m_pc = 3.086*10**(16) #meters per pc
+    G = 6.6743*10**(-11) #gravitational constant
+    m_sun = 1.98847*10**(30) #solar mass
+    tyear = 365*24*60*60 #seconds in a year
+        #drop NaNs
+    df = df.dropna(subset=['radial_velocity','pmra','pmdec','ra','dec','dist_trig_parallax'])
+        #convert to m/s
+    df['radial_velocity'] = df['radial_velocity'] * 10**3
+    df['pmra'] = df['dist_trig_parallax'] * (m_pc) * df['pmra']*10**(-3)*(1/60**2) /tyear * np.pi/180
+    df['pmdec'] = df['dist_trig_parallax'] * (m_pc) * df['pmdec']*10**(-3)*(1/60**2) /tyear * np.pi/180
+        #get magnitude of 3D velocity vector
+    df['velMag'] = np.sqrt( df['radial_velocity']**2 +df['pmra']**2 + df['pmdec']**2 )
+        #get center of cluster   
+    ra = np.mean(df['ra']) * np.pi/180
+    dec = np.mean(df['dec']) * np.pi/180
+    dist = np.mean(df['dist_trig_parallax']) * m_pc
+            #--> cartesian
+    x = dist*np.cos(dec)*np.cos(ra)
+    y = dist*np.cos(dec)*np.sin(ra)
+    z = dist * np.sin(dec)
+        #get cartisian coords of each star
+    df['x'] = df['dist_trig_parallax'] * m_pc * np.cos(df['dec']*np.pi/180) * np.cos(df['ra']*np.pi/180)
+    df['y'] = df['dist_trig_parallax'] * m_pc * np.cos(df['dec']*np.pi/180) * np.sin(df['ra']*np.pi/180)
+    df['z'] = df['dist_trig_parallax'] * m_pc * np.sin(df['dec']*np.pi/180)
+    pts = list(zip(df.x,df.y,df.z))
+        #get radial dist to each star
+    df['radial'] = np.sqrt((df['x']-x)**2 + (df['y']-y)**2 + (df['z']-z)**2)
+        #estimate radius of cluster with convex hull
+    vol = spat.ConvexHull(pts).volume
+    radius = (3*vol/(4*np.pi))**(1/3)
+        #get velocity dispersion at radius
+    temp = df[df['radial'] <= radius]
+    disp = stat.stdev(temp['velMag'])
+        #estimate cluster mass
+    if force_radius > 0:
+        radius = force_radius * m_pc
+    m = radius*disp**2/G
+    #convert radius to pc, mass to solar masses
+    radius /= m_pc
+    m /= m_sun
+    #return mass and radius
+    return m, radius
+
 
 #Run Main
 main()

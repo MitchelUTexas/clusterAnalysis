@@ -303,10 +303,15 @@ def main():
         #spec parallax
     dist_specParallax = stat.mean(data["dist_spec_parallax"])
     err_dist_specParallax = np.sqrt(np.sum((data["err_dist_spec_parallax"]**2))) / data.shape[0]
+        #MS Fit
+    dMod_MS, dMod_MS_err = MS_fit(data)
+    dist_MS = 10**((dMod_MS + 5)/5)
+    dist_MS_err = dist_MS * 1/5 * np.log(10) * dMod_MS_err
         #print
     print("Trig Parallax: " + str(sciRound(dist_trigParallax,err_dist_trigParallax)) + " pc")
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")
     print("Spec Parallax " + str(sciRound(dist_specParallax,err_dist_specParallax)) + " pc")
+    print("MS: " + str(sciRound(dist_MS,dist_MS_err)) + ' pc')
     if cep.shape[0] > 0:
         print('Cepheid PL: ' + str(sciRound(dist_cep,dist_cep_err)) + ' pc, ' + cep.shape[0] + ' cepheids')
     else:
@@ -519,6 +524,15 @@ def virial(df,force_radius=0):
     #return mass and radius
     return m, radius
 
+def MS_fit(df):
+    popt, pcov = curve_fit(zams,df["(B-V)_intr"],df['V_rel'],sigma=df['err_V_rel'])
+    dMod = popt[0]
+    dMod_err = np.sqrt(np.diag(pcov)[0])
+    return dMod, dMod_err
+
+def zams(color,dMod):
+    absMag = color #swap to hyades fit
+    return absMag + dMod
 
 #Run Main
 main()

@@ -19,8 +19,6 @@ from scipy import spatial as spat
 from scipy import stats as stats_sci
 import statistics as stat
 import sys
-from uncertainties import ufloat
-from uncertainties.umath import *
 
 #Stopping printing of warnings
 pd.set_option("mode.chained_assignment", None)
@@ -215,10 +213,8 @@ def main():
         R,R_err = 3.1,.1
         print("Assuming R=3.1 +/- .1")
         #Calculate distance estimate with error
-    dMod = ufloat(dMod_real,dMod_real_err)
-    dist = 10**((dMod + 5) / 5)
-    err_dist_ext = dist.std_dev
-    dist_ext = dist.nominal_value
+    dist_ext = 10**((dMod_real + 5) / 5)
+    err_dist_ext = dist_ext * 1/5 * np.log(10) * dMod_real_err
 
     #Create variable Extinciton graph
     plt.figure()

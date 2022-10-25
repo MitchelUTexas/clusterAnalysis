@@ -33,8 +33,8 @@ def main():
     #Set size of region for variable extinction analysis (box with side length regSize, in degrees)
     regSize = 360
     #Choose GAIA CSV input file name
-    GAIAname = "hyadesGaia.csv"
-    SIMBADname = "hyadesSim.csv"
+    GAIAname = "pleiadesGaia.csv"
+    SIMBADname = "pleiadesSim.csv"
 #----------SET USER PARAMETERS HERE---------
 
 
@@ -95,9 +95,6 @@ def main():
 
     #Join gaia and simbad data
     data = coordMatch(gaia,simbad)
-        #Delete old dataframes
-    del gaia
-    del simbad
     
     #Plot proper motions with z std circled
     plt.figure()
@@ -294,9 +291,19 @@ def main():
     plt.show()
 
     #Get Distance Estimates and print them
+        #cephid distnce
+            #outside of the table cepheid apparent magnitude can be found many different ways and the code should be updated accordingly
+            #extinction corrected via gaia's gspphot values since spectral typing not as reliable
+    cep = gaia.dropna(subset=['pf','ag_gspphot'])
+    cep['absMag_cepheid']= -1*(2.76*(np.log10(cep["pf"]))-1.0)-4.16
+    cep['dist_cep'] = 10**((cep["int_average_g"] - cep['ag_gspphot'] - cep['absMag_cepheid'] +5)/5)
+    cep['absMag_cepheid_err'] = 2.76*(np.log10(cep["pf_error"]))
+    cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["int_average_g_error"]**2 + cep['absMag_cepheid_err']**2)/5)
+    dist_cep = np.mean(cep['dist_cep'])
+    dist_cep_err = np.sqrt(np.sum((cep["dist_cep_err"]**2))) / cep.shape[0]
         #Trig parallax
-    dist_trigParallax = stat.mean(data["dist_trig_parallax"])
-    err_dist_trigParallax = np.sqrt(np.sum((data["err_dist_trig_parallax"]**2))) / data.shape[0]
+    dist_trigParallax = np.nanmean(data["dist_trig_parallax"])
+    err_dist_trigParallax = np.sqrt(np.nansum((data["err_dist_trig_parallax"]**2))) / data.shape[0]
         #spec parallax
     dist_specParallax = stat.mean(data["dist_spec_parallax"])
     err_dist_specParallax = np.sqrt(np.sum((data["err_dist_spec_parallax"]**2))) / data.shape[0]
@@ -304,7 +311,10 @@ def main():
     print("Trig Parallax: " + str(sciRound(dist_trigParallax,err_dist_trigParallax)) + " pc")
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")
     print("Spec Parallax " + str(sciRound(dist_specParallax,err_dist_specParallax)) + " pc")
-
+    if cep.shape[0] > 0:
+        print('Cepheid PL: ' + str(sciRound(dist_cep,dist_cep_err)) + ' pc, ' + cep.shape[0] + ' cepheids')
+    else:
+        print('0 cepheids found in cluster')
     #virial thm
     mass_both, radius_gaia = virial(data,force_radius=radius_gaia)
     print('Mass =', figRound(mass_both),'solar masses')

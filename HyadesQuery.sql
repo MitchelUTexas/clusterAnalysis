@@ -4,6 +4,7 @@ select
     gs.phot_g_mean_mag, gs.phot_bp_mean_mag, gs.phot_rp_mean_mag,
     ap.mh_gspspec, ap.mh_gspspec_lower, ap.mh_gspspec_upper, ap.fem_gspspec, ap.fem_gspspec_lower, ap.fem_gspspec_upper,
     ap.ag_gspphot, ap.ag_gspphot_lower, ap.ag_gspphot_upper, ap.mg_gspphot, ap.mg_gspphot_lower, ap.mg_gspphot_upper,
+    ap.ebpminrp_gspphot, ap.ebpminrp_gspphot_lower, ap.ebpminrp_gspphot_upper,
     cep.PF, cep.PF_ERROR, cep.INT_AVERAGE_G, cep.INT_AVERAGE_G_ERROR
 from
     gaiadr3.gaia_source as gs

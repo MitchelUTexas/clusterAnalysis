@@ -24,8 +24,8 @@ def main():
     #Set z-score for pm exclusion
     z=1
     #Choose GAIA CSV input file name
-    GAIAname = "M48Gaia.csv"
-    SIMBADname = "M48Sim.csv"
+    GAIAname = "M44Gaia.csv"
+    SIMBADname = "M44Sim.csv"
     #Set to true if using a very nearby cluster for testing purposes
     TestData = False
 #----------SET USER PARAMETERS HERE---------
@@ -245,12 +245,13 @@ def main():
     #Get Distance Estimates and print them
         #cephid distnce
     cep = gaia.dropna(subset=['pf','ag_gspphot'])
-    cep['absMag_cepheid']= -1*(2.76*(np.log10(cep["pf"]))-1.0)-4.16
-    cep['dist_cep'] = 10**((cep["int_average_g"] - cep['ag_gspphot'] - cep['absMag_cepheid'] +5)/5)
-    cep['absMag_cepheid_err'] = 2.76*(np.log10(cep["pf_error"]))
-    cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["int_average_g_error"]**2 + cep['absMag_cepheid_err']**2)/5)
-    dist_cep = np.mean(cep['dist_cep'])
-    dist_cep_err = np.sqrt(np.nansum((cep["dist_cep_err"]**2))) / cep.shape[0]
+    if cep.shape[0] > 0:
+        cep['absMag_cepheid']= -1*(2.76*(np.log10(cep["pf"]))-1.0)-4.16
+        cep['dist_cep'] = 10**((cep["int_average_g"] - cep['ag_gspphot'] - cep['absMag_cepheid'] +5)/5)
+        cep['absMag_cepheid_err'] = 2.76*(np.log10(cep["pf_error"]))
+        cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["int_average_g_error"]**2 + cep['absMag_cepheid_err']**2)/5)
+        dist_cep = np.mean(cep['dist_cep'])
+        dist_cep_err = np.sqrt(np.nansum((cep["dist_cep_err"]**2))) / cep.shape[0]
         #Trig parallax
     dist_trigParallax = np.nanmean(gaia_mems["dist_trig_parallax"])
     err_dist_trigParallax = np.sqrt(np.nansum((gaia_mems["err_dist_trig_parallax"]**2))) / gaia_mems.shape[0]
@@ -259,14 +260,25 @@ def main():
     err_dist_specParallax = np.sqrt(np.sum((data["err_dist_spec_parallax"]**2))) / data.shape[0]
         #MS Fit
     dMod_MS, dMod_MS_err = MS_fit(gaia_mems)
-    dist_MS = 10**((dMod_MS + 5)/5)
-    dist_MS_err = dist_MS * 1/5 * np.log(10) * dMod_MS_err
+    dist_MS = 10**((-1*dMod_MS+5-3.3)/5) #3.3 from hyades distance modulus
+    dist_MS_err = dist_MS * 1/5 * np.log(10) * np.abs(dMod_MS_err)
         #print
     print("Trig Parallax: " + str(sciRound(dist_trigParallax,err_dist_trigParallax)) + " pc")
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")
     print("Spec Parallax " + str(sciRound(dist_specParallax,err_dist_specParallax)) + " pc")
     if not TestData:
         print("MS: " + str(sciRound(dist_MS,dist_MS_err)) + ' pc')
+        #Plot corrected CMD
+        plt.figure()
+        plt.gca().invert_yaxis()
+        plt.title("Corrected CMD")
+        plt.xlabel("(BP-RP)_intr [Mag]")
+        plt.ylabel("G_rel [Mag]")
+        plt.scatter(gaia_mems["(BP-RP)_intr"],gaia_mems["G_rel"], color="red", label = "Cluster Stars")
+        cs = np.linspace(np.min(gaia_mems["(BP-RP)_intr"]),np.max(gaia_mems["(BP-RP)_intr"]),1000)
+        plt.plot(cs, zams(cs,dMod_MS), color='blue', label='MS Line')
+        plt.legend()
+        plt.show()
     else:
         a,b,c,d = getZAMS(gaia_mems)
         print('MS Line: ' + str(figRound(a)) + 'x^3 + ' + str(figRound(b)) + 'x^2 + ' + str(figRound(c)) + 'x + ' + str(figRound(a)))
@@ -469,11 +481,11 @@ def MS_fit(df):
 
 #zams line (+distance modulus) for MS fit
 def zams(color,dMod):
-    absMag = 9.8*color**3 -28*color**2 + 30*color + 9.8 #getZAMS() result for hyades
-    return absMag + dMod
+    absMag = 11*color**3 -28*color**2 +27*color +11 + dMod #getZAMS() result for hyades + dMod
+    return absMag
 
 def getZAMS(df):
-    a,b,c,d = np.polyfit(df['(BP-RP)_intr'],df['G_rel'],3)
+    a,b,c,d = np.polyfit(df['(BP-RP)_intr'],df['mg_gspphot'],3)
     return a,b,c,d
 
 #Run Main

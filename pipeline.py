@@ -22,7 +22,7 @@ pd.set_option("mode.chained_assignment", None)
 def main():
 #----------SET USER PARAMETERS HERE---------
     #Set z-score for pm exclusion
-    z=1
+    z=2
     #Choose GAIA CSV input file name
     GAIAname = "M44Gaia.csv"
     SIMBADname = "M44Sim.csv"
@@ -148,7 +148,7 @@ def main():
     plt.title("Trig Parallax Distances (Cluster Only)")
     plt.xlabel("Distance (pc)")
     plt.ylabel("Freq")
-    plt.hist((gaia_mems["dist_trig_parallax"]), bins=100, range=(0,1000))
+    plt.hist((gaia_mems["dist_trig_parallax"]), bins=100, range=(0,max(gaia_mems['dist_trig_parallax'])))
     plt.show()
 
     #Plot cluster ra, dec
@@ -246,11 +246,17 @@ def main():
         #cephid distnce
     cep = gaia.dropna(subset=['pf','ag_gspphot'])
     if cep.shape[0] > 0:
-        cep['absMag_cepheid']= -1*(2.76*(np.log10(cep["pf"]))-1.0)-4.16
-        cep['dist_cep'] = 10**((cep["int_average_g"] - cep['ag_gspphot'] - cep['absMag_cepheid'] +5)/5)
-        cep['absMag_cepheid_err'] = 2.76*(np.log10(cep["pf_error"]))
-        cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["int_average_g_error"]**2 + cep['absMag_cepheid_err']**2)/5)
+            #gaia g,bp,rp --> Johnson U,B,V
+        #Conversions from https://gea.esac.esa.int/archive/documentation/GDR3/Data_processing/chap_cu5pho/cu5pho_sec_photSystem/cu5pho_ssec_photRelations.html
+        cep["bp-rp"] = cep["phot_bp_mean_mag"] - cep["phot_rp_mean_mag"]
+        cep["V_gaia"] = cep["int_average_g"] - cep['ag_gspphot'] + .02704 - .01424*(cep["bp-rp"]) + 0.2156*(cep["bp-rp"])**2 - 0.01426*(cep["bp-rp"])**3
+        cep['V_gaia_error'] = np.sqrt(cep['int_average_g_error']**2 + ((cep['ag_gspphot_upper']-cep['ag_gspphot_lower'])/2)**2 + .03**2) #.03 mag error estimated from given conversion formula error since gaia magnitude errors not given
+        cep['absMag_cepheid']= -2.678*(np.log10(cep["pf"]))-1.54 #from https://www.aanda.org/articles/aa/pdf/2018/11/aa33478-18.pdf citing gaia collaboration 2017 in Table 6
+        cep['dist_cep'] = 10**((cep["V_gaia"] - cep['absMag_cepheid'] +5)/5)
+        cep['absMag_cepheid_err'] = np.sqrt((2.678*1/(cep["pf"]*np.log(10))*cep['pf_error'])**2 + .1**2 + (np.log10(cep["pf"]))**2*.1**2) #assumed .1 error in beta since none was given
+        cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["V_gaia_error"]**2 + cep['absMag_cepheid_err']**2)/5)
         dist_cep = np.mean(cep['dist_cep'])
+        dist_cep_trig = np.mean(cep['dist_trig_parallax'])
         dist_cep_err = np.sqrt(np.nansum((cep["dist_cep_err"]**2))) / cep.shape[0]
         #Trig parallax
     dist_trigParallax = np.nanmean(gaia_mems["dist_trig_parallax"])
@@ -294,7 +300,7 @@ def main():
         plt.legend()
         plt.show()
     if cep.shape[0] > 0:
-        print('Cepheid PL: ' + str(sciRound(dist_cep,dist_cep_err)) + ' pc, ' + cep.shape[0] + ' cepheids')
+        print('Cepheid PL: ' + str(sciRound(dist_cep,dist_cep_err)) + ' pc, ' + str(cep.shape[0]) + ' cepheids ' + str(figRound(dist_cep_trig)))
     else:
         print('No cepheids found in cluster')
     #virial thm
@@ -484,6 +490,7 @@ def zams(color,dMod):
     absMag = 11*color**3 -28*color**2 +27*color +11 + dMod #getZAMS() result for hyades + dMod
     return absMag
 
+#create MS line from hyades cluster
 def getZAMS(df):
     a,b,c,d = np.polyfit(df['(BP-RP)_intr'],df['mg_gspphot'],3)
     return a,b,c,d

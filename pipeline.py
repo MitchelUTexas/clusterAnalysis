@@ -1,7 +1,5 @@
 #Finds Distance estimates for a specified cluster
 #Error propigation via taylor approximation (assuming symettric gaussian errors)
-    #TODO: add better cluster membership filtering with algorithms
-    #TODO: add isochrone fit, also get age
 
 #Imports
 from ssl import PEM_cert_to_DER_cert
@@ -25,9 +23,15 @@ def main():
     z=2
     #Choose GAIA CSV input file name
     GAIAname = "M44Gaia.csv"
+    #Choose SIMBAD CSV input file name
     SIMBADname = "M44Sim.csv"
     #Set to true if using a very nearby cluster for testing purposes
     TestData = False
+    #Set to true if setting R= 3.1 +/- .1
+    forceR = True
+    #Set to true if you have already done cluster membership on the gaia data
+    didMembership = True
+    memName = 'M44Mems.csv'
 #----------SET USER PARAMETERS HERE---------
 
 
@@ -64,45 +68,49 @@ def main():
     simbad['err_(B-V)_app'] = .03 * np.sqrt(2) #by error propigation
 
     #Filtering gaia data for nonvalues and similar apparant magnitudes
-    maxMag = 10
     gaia = gaia.dropna(subset=["phot_g_mean_mag","phot_bp_mean_mag","phot_rp_mean_mag","parallax"])
-    gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag) & (gaia["parallax"] > 0)]
-        #Get trig parallax distance to each star
+    if not didMembership:
+        maxMag = 10
+        gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag) & (gaia["parallax"] > 0)]
+    #Get trig parallax distance to each star
     gaia["dist_trig_parallax"] = 1/(gaia["parallax"]/1000)
     gaia["err_dist_trig_parallax"] = np.abs(-1000/(gaia["parallax"]**2)*gaia["parallax_error"])
-        #get gaia color
+    #get gaia color
     gaia["bp-rp"] = gaia["phot_bp_mean_mag"] - gaia["phot_rp_mean_mag"]
-
-    #print different databases' ra, dec
-    plt.figure()
-    plt.title("Ra, Dec of Database Stars")
-    plt.scatter(gaia["ra"],gaia["dec"],label="gaia",color='blue')
-    plt.scatter(simbad["ra"],simbad["Dec"],label='simbad',color='red')
-    plt.xlabel("Ra [degrees]")
-    plt.ylabel("Dec [degrees]")
-    plt.legend()
-    plt.show()
     
-    #Plot proper motions with z std circled
-    plt.figure()
-    plt.title("Proper Motions")
-    plt.xlabel("PM RA [mas/yr]")
-    plt.ylabel("PM Dec [mas/yr]")
-    plt.scatter(gaia["pmra"],gaia["pmdec"])
-    ra_mean = stat.mean(gaia["pmra"])
-    dec_mean = stat.mean(gaia["pmdec"])
-    ra_std = stat.stdev(gaia["pmra"])
-    dec_std = stat.stdev(gaia["pmdec"])
-    plt.xlim((ra_mean - 3*ra_std*z),(ra_mean + 5*ra_std*z))
-    plt.ylim((dec_mean - 3*dec_std*z),(dec_mean + 5*dec_std*z))
-    plt.gca().add_patch(Ellipse(xy=(ra_mean,dec_mean),width=(2*ra_std*z),height=(2*dec_std*z),fill=False,color="red"))
-    plt.show()
+    if not didMembership:
+        #Get cluster members by removing pm and parallax z-std outliers
+        #Plot proper motions with z std circled
+        plt.figure()
+        plt.title("Proper Motions")
+        plt.xlabel("PM RA [mas/yr]")
+        plt.ylabel("PM Dec [mas/yr]")
+        plt.scatter(gaia["pmra"],gaia["pmdec"])
+        ra_mean = stat.mean(gaia["pmra"])
+        dec_mean = stat.mean(gaia["pmdec"])
+        ra_std = stat.stdev(gaia["pmra"])
+        dec_std = stat.stdev(gaia["pmdec"])
+        plt.xlim((ra_mean - 3*ra_std*z),(ra_mean + 5*ra_std*z))
+        plt.ylim((dec_mean - 3*dec_std*z),(dec_mean + 5*dec_std*z))
+        plt.gca().add_patch(Ellipse(xy=(ra_mean,dec_mean),width=(2*ra_std*z),height=(2*dec_std*z),fill=False,color="red"))
+        plt.show()
 
-    #Join gaia and simbad data
-    data = coordMatch(gaia,simbad)
-    #Get cluster members by removing pm and parallax z-std outliers
-    data = getMems(data,z)
-    gaia_mems = getMems(gaia,z)
+        #Join gaia and simbad data
+        data = coordMatch(gaia,simbad)
+        data = getMems(data,z)
+        gaia_mems = getMems(gaia,z)
+        
+    else:
+        #get cluster members from input file
+        mems = pd.read_csv(memName)
+        mems = mems[mems['probability']>=.75]
+        gaia_mems = mems.merge(gaia,how='inner',on='source_id')
+        gaia_mems = gaia_mems.dropna(subset='probability')
+        maxMag = 15
+        gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag)]
+        print('Number of stars:', gaia_mems.shape[0])
+        data = coordMatch(gaia_mems,simbad)
+
     if TestData:
         gaia_mems_real = gaia_mems.copy()
         gaia_mems = data.copy()
@@ -174,6 +182,12 @@ def main():
         R, R_err, dMod_real,dMod_real_err = varExt(gaia_mems)
     else:
         R, R_err, dMod_real,dMod_real_err = varExt(data)
+
+    #force R value
+    if forceR:
+        R = 3.1
+        R_err = .1
+
     #Print Results
     print("R = " + str(sciRound(R,R_err)))
         #Use R=3.1 if regression R values doesn't make sense

@@ -19,19 +19,22 @@ pd.set_option("mode.chained_assignment", None)
 #Main
 def main():
 #----------SET USER PARAMETERS HERE---------
-    #Set z-score for pm exclusion
-    z=2
     #Choose GAIA CSV input file name
     GAIAname = "M44Gaia.csv"
     #Choose SIMBAD CSV input file name
     SIMBADname = "M44Sim.csv"
-    #Set to true if using a very nearby cluster for testing purposes
+    #Set to true if using a very nearby cluster for testing purposes/MS generation
     TestData = False
     #Set to true if setting R= 3.1 +/- .1
     forceR = True
-    #Set to true if you have already done cluster membership on the gaia data
+    #Set to true if you have already done cluster membership on the gaia data (i.e. instead of pm (proper motion) removal)
     didMembership = True
+        #Set z-score for pm exclusion
+    z=2
+        #Filename with member source IDS (and probabilities), i.e. the membership list
     memName = 'M44Mems.csv'
+    #set a maximum magnitude for filtering
+    maxMag = 15
 #----------SET USER PARAMETERS HERE---------
 
 
@@ -48,7 +51,7 @@ def main():
         #remove duplicates by Ra, Dec
     simbad.drop_duplicates(subset=["coord1 (ICRS,J2000/2000)"])
         #Ignoring 'A value is trying to be set on a copy of a slice from a DataFrame.' warnings, this is what I am trying to do
-        #Conver Ra,Dec to decimal degrees
+        #Convert Ra,Dec to decimal degrees
     simbad["ra"] = simbad["coord1 (ICRS,J2000/2000)"].map(lambda x: float(x.split()[0])*(15) + float(x.split()[1])*(15/60) + float(x.split()[2])*(15/3600))
     simbad["Dec"] = simbad["coord1 (ICRS,J2000/2000)"].map(lambda x: np.sign(float(x.split()[3]))*(np.abs(float(x.split()[3])) + float(x.split()[4])*(1/60) + float(x.split()[5])*(1/3600)) )
         #Drop old coordinate format
@@ -56,13 +59,14 @@ def main():
         #parse simbad B,V magnitudes
     simbad['Mag B'] = simbad['Mag B'].map(lambda x: x.strip())
     simbad['Mag V'] = simbad['Mag V'].map(lambda x: x.strip())
+        #drop stars without B and V magnitudes listed
     simbad = simbad[(simbad['Mag B'] != '~') & (simbad['Mag V'] != '~')]
     simbad['Mag B'] = simbad['Mag B'].astype(float)
     simbad['Mag V'] = simbad['Mag V'].astype(float)
     simbad = simbad.rename(columns={'Mag B':"B_app",'Mag V':'V_app'})
         #get simbad color
     simbad["(B-V)_app"] = simbad['B_app'].astype(float) - simbad["V_app"].astype(float)
-            #setting .03 mag errors
+            #setting .03 mag errors since not given by our simbad query (aprrox. from color differences between papers we looked at)
     simbad['err_V_app'] = .03
     simbad['err_B_app'] = .03
     simbad['err_(B-V)_app'] = .03 * np.sqrt(2) #by error propigation
@@ -70,7 +74,7 @@ def main():
     #Filtering gaia data for nonvalues and similar apparant magnitudes
     gaia = gaia.dropna(subset=["phot_g_mean_mag","phot_bp_mean_mag","phot_rp_mean_mag","parallax"])
     if not didMembership:
-        maxMag = 10
+            #filter data is membership list not given
         gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag) & (gaia["parallax"] > 0)]
     #Get trig parallax distance to each star
     gaia["dist_trig_parallax"] = 1/(gaia["parallax"]/1000)
@@ -78,8 +82,8 @@ def main():
     #get gaia color
     gaia["bp-rp"] = gaia["phot_bp_mean_mag"] - gaia["phot_rp_mean_mag"]
     
+    #if no membership list is given
     if not didMembership:
-        #Get cluster members by removing pm and parallax z-std outliers
         #Plot proper motions with z std circled
         plt.figure()
         plt.title("Proper Motions")
@@ -97,24 +101,31 @@ def main():
 
         #Join gaia and simbad data
         data = coordMatch(gaia,simbad)
+        #Get cluster members by removing pm and parallax z-std outliers
         data = getMems(data,z)
         gaia_mems = getMems(gaia,z)
-        
+    
+    #if membership list IS given
     else:
-        #get cluster members from input file
+        #get cluster members from input file, match to query data
         mems = pd.read_csv(memName)
-        mems = mems[mems['probability']>=.75]
+        mems = mems[mems['probability']>=.75] #choosing members with probability >= .75, can change the cutoff
         gaia_mems = mems.merge(gaia,how='inner',on='source_id')
         gaia_mems = gaia_mems.dropna(subset='probability')
-        maxMag = 15
-        gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag)]
+        gaia = gaia[(gaia["phot_g_mean_mag"] < maxMag) & (gaia["phot_bp_mean_mag"] < maxMag) & (gaia["phot_rp_mean_mag"] < maxMag)] #magnitude filter
+            #print number of stars in each dataset
         print('Number of stars:', gaia_mems.shape[0])
+            #match gaia to simbad stars
         data = coordMatch(gaia_mems,simbad)
+        print("Number Spec: ", data.shape[0])
 
+    #deal with dataframes if in test mode
     if TestData:
+        #creating a copy for later
         gaia_mems_real = gaia_mems.copy()
         gaia_mems = data.copy()
-        #drop cluster members without needed gspphot data
+    
+    #drop cluster members without needed gspphot data
     gaia_mems = gaia_mems.dropna(subset=['ebpminrp_gspphot','ebpminrp_gspphot_upper','ebpminrp_gspphot_lower'])
     #Get intrinsic magnitudes and color excesses from spec types
     data = getSpecParams(data)
@@ -125,6 +136,7 @@ def main():
     FeH_upper = np.nanmean( gaia_mems["fem_gspspec_upper"] - gaia_mems["mh_gspspec_upper"] )
         #drop intermediary values
     gaia_mems = gaia_mems.drop(columns=["fem_gspspec","fem_gspspec_lower","fem_gspspec_upper","mh_gspspec","mh_gspspec_lower","mh_gspspec_upper"])
+        #print metallicity results
     print("Fe/H =", figRound(FeH), ", lowerConf =", figRound(FeH_lower), ", upperConf = ", figRound(FeH_upper))
 
     #Plot color-color
@@ -139,11 +151,14 @@ def main():
     data = data.drop(columns=["phot_g_mean_mag","phot_bp_mean_mag","phot_rp_mean_mag","bp-rp"])
 
     #Format Data For Ease of Use
+        #errors propigated by taylor approximation
+    #use simbad magntiudes/colors for gaia+simbad dataset
     data["dMod_app"] = data["V_app"] - data["V_intr"]
     data["err_dMod_app"] = np.sqrt(data["err_V_app"]**2 + data["err_V_intr"]**2)
     data["colorExcess"] = data["(B-V)_app"] - data["(B-V)_intr"]
     data["err_colorExcess"] = np.sqrt(data["err_(B-V)_app"]**2 + data["err_(B-V)_intr"]**2)
 
+    #use gaia colors/magnitudes for gaia only dataset
     gaia_mems["dMod_app"] = gaia_mems["phot_g_mean_mag"] - gaia_mems["mg_gspphot"]
     gaia_mems["err_dMod_app"] = (gaia_mems['mg_gspphot_upper'] - gaia_mems['mg_gspphot_lower'])/2 #no errors given for magnitudes in gaia
     gaia_mems["colorExcess"] = gaia_mems['ebpminrp_gspphot']
@@ -183,7 +198,7 @@ def main():
     else:
         R, R_err, dMod_real,dMod_real_err = varExt(data)
 
-    #force R value
+    #force R value if applicable
     if forceR:
         R = 3.1
         R_err = .1
@@ -194,7 +209,7 @@ def main():
     if R<0:
         R,R_err = 3.1,.1
         print("Assuming R=3.1 +/- .1")
-        #Calculate distance estimate with error
+        #Calculate distance estimate with error --> from y-int of variable extinction graph
     dist_ext = 10**((dMod_real + 5) / 5)
     err_dist_ext = dist_ext * 1/5 * np.log(10) * dMod_real_err
 
@@ -235,7 +250,8 @@ def main():
     plt.legend()
     plt.show()
 
-    #plot both extinctions
+    #plot our extinction versus that in GAIA
+        #slope 1 line also plotted
     plt.figure()
     plt.title("Extinction Comparison")
     plt.xlabel("A_V variable extinction [Mag]")
@@ -244,6 +260,8 @@ def main():
     lp = np.linspace(min(R*gaia_mems['colorExcess']),max(R*gaia_mems['colorExcess']),1000)
     plt.plot(lp,lp)
     plt.show()
+        #print average reddening for reference
+    print('Average Reddening:',figRound(np.mean(R*gaia_mems['colorExcess'])))
 
     #Get individual spectroscopic parallax distance
     data["dist_spec_parallax"] = 10**((data['V_rel'] - data["V_intr"] + 5)/5)
@@ -257,7 +275,7 @@ def main():
     plt.show()
 
     #Get Distance Estimates and print them
-        #cephid distnce
+        #cephid distnce (NOT TESTED FOR ACCURACY)
     cep = gaia.dropna(subset=['pf','ag_gspphot'])
     if cep.shape[0] > 0:
             #gaia g,bp,rp --> Johnson U,B,V
@@ -265,13 +283,16 @@ def main():
         cep["bp-rp"] = cep["phot_bp_mean_mag"] - cep["phot_rp_mean_mag"]
         cep["V_gaia"] = cep["int_average_g"] - cep['ag_gspphot'] + .02704 - .01424*(cep["bp-rp"]) + 0.2156*(cep["bp-rp"])**2 - 0.01426*(cep["bp-rp"])**3
         cep['V_gaia_error'] = np.sqrt(cep['int_average_g_error']**2 + ((cep['ag_gspphot_upper']-cep['ag_gspphot_lower'])/2)**2 + .03**2) #.03 mag error estimated from given conversion formula error since gaia magnitude errors not given
-        cep['absMag_cepheid']= -2.678*(np.log10(cep["pf"]))-1.54 #from https://www.aanda.org/articles/aa/pdf/2018/11/aa33478-18.pdf citing gaia collaboration 2017 in Table 6
-        cep['dist_cep'] = 10**((cep["V_gaia"] - cep['absMag_cepheid'] +5)/5)
+            #use PL relation
+            #from https://www.aanda.org/articles/aa/pdf/2018/11/aa33478-18.pdf citing gaia collaboration 2017 in Table 6
+        cep['absMag_cepheid']= -2.678*(np.log10(cep["pf"]))-1.54 
         cep['absMag_cepheid_err'] = np.sqrt((2.678*1/(cep["pf"]*np.log(10))*cep['pf_error'])**2 + .1**2 + (np.log10(cep["pf"]))**2*.1**2) #assumed .1 error in beta since none was given
+            #get distance
+        cep['dist_cep'] = 10**((cep["V_gaia"] - cep['absMag_cepheid'] +5)/5)
         cep['dist_cep_err'] = cep['dist_cep'] * np.log(10) * (np.sqrt(cep["V_gaia_error"]**2 + cep['absMag_cepheid_err']**2)/5)
         dist_cep = np.mean(cep['dist_cep'])
-        dist_cep_trig = np.mean(cep['dist_trig_parallax'])
         dist_cep_err = np.sqrt(np.nansum((cep["dist_cep_err"]**2))) / cep.shape[0]
+        dist_cep_trig = np.mean(cep['dist_trig_parallax']) #trig parallax of cepheids, for comparison if wanted
         #Trig parallax
     dist_trigParallax = np.nanmean(gaia_mems["dist_trig_parallax"])
     err_dist_trigParallax = np.sqrt(np.nansum((gaia_mems["err_dist_trig_parallax"]**2))) / gaia_mems.shape[0]
@@ -286,9 +307,11 @@ def main():
     print("Trig Parallax: " + str(sciRound(dist_trigParallax,err_dist_trigParallax)) + " pc")
     print("Extinction: " + str(sciRound(dist_ext,err_dist_ext)) + " pc")
     print("Spec Parallax " + str(sciRound(dist_specParallax,err_dist_specParallax)) + " pc")
+
+    #if not in test mode, print MS distance and plot MS fit
     if not TestData:
         print("MS: " + str(sciRound(dist_MS,dist_MS_err)) + ' pc')
-        #Plot corrected CMD
+        #Plot corrected CMD with MS fit
         plt.figure()
         plt.gca().invert_yaxis()
         plt.title("Corrected CMD")
@@ -299,10 +322,13 @@ def main():
         plt.plot(cs, zams(cs,dMod_MS), color='blue', label='MS Line')
         plt.legend()
         plt.show()
+    #if in test mode, create MS from cubic fit
     else:
+        #create MS using cubic fit
         a,b,c,d = getZAMS(gaia_mems)
+            #print cubic MS fit
         print('MS Line: ' + str(figRound(a)) + 'x^3 + ' + str(figRound(b)) + 'x^2 + ' + str(figRound(c)) + 'x + ' + str(figRound(a)))
-        #Plot corrected CMD
+        #Plot corrected CMD with created MS
         plt.figure()
         plt.gca().invert_yaxis()
         plt.title("Corrected CMD")
@@ -313,11 +339,14 @@ def main():
         plt.plot(cs, a*cs**3 + b*cs**2 + c*cs + d, color='blue', label='MS Line')
         plt.legend()
         plt.show()
+    #print cepeid distance if there are any
     if cep.shape[0] > 0:
         print('Cepheid PL: ' + str(sciRound(dist_cep,dist_cep_err)) + ' pc, ' + str(cep.shape[0]) + ' cepheids ' + str(figRound(dist_cep_trig)))
     else:
         print('No cepheids found in cluster')
-    #virial thm
+    
+    #virial thm for mass and radius estimate
+        #membership seems to affect this a lot - be careful
     if not TestData:
         mass_gaia, radius_gaia = virial(gaia_mems)
         print('Mass =', figRound(mass_gaia),'solar masses')
@@ -349,10 +378,14 @@ def varExt(stars):
 #Returns pandas dataframe to correct for extinction and reddening
 def ext_correct(stars,type,R,R_err):
     #Use intrinsic color from now on to account for reddening
+    #if simbad+gaia data
     if type=='both':
+        #do extinction correction
         stars["V_rel"] = stars["V_app"] - R*stars["colorExcess"]
         stars["err_V_rel"] = np.sqrt(stars["err_V_app"]**2 + R**2 * stars["err_colorExcess"]**2 + stars['colorExcess']**2 *R_err**2)
+    #if gaia only data
     else:
+        #do extinciton correction
         stars["G_rel"] = stars["phot_g_mean_mag"] - R*stars["colorExcess"]
             #gaia gives no errors for magnitudes
         stars["err_G_rel"] = np.sqrt(stars["err_colorExcess"]**2 + stars['colorExcess']**2 *R_err**2)
@@ -367,7 +400,7 @@ def ext_fit(e, r, dMod_real):
 def figRound(num):
     return float("%.2g" % num)
 
-#get number decimals
+#get number of decimals
 def numDec(num):
     if num == 0:
         return 2
@@ -394,6 +427,7 @@ def coordMatch(gaia, simbad):
     matches = matches[np.abs(matches["dec"] - matches["Dec"]) <= tolDec]
         #renaming merged columns
     matches = matches.rename(columns={'ra_x':'ra'})
+    #deal with no matches
     if matches.shape[0] == 0:
         print("ERROR: No Coordinate Matches")
         sys.exit()
@@ -401,14 +435,11 @@ def coordMatch(gaia, simbad):
 
 #Get intrinsic color and magnitude from spectral type
 def getSpecParams(frame):
-            #create list of ordered spec types
+        #create list of ordered spec types
     order = "OBAFGKM_"
     order2 = [("O" + str(i)) for i in range(5,10)]
     order2.extend([(let + str(i)) for let in "BAFGK" for i in range(0,10)])
     order2.extend([("M" + str(i)) for i in range(0,9)])
-    #Used tabuled M_V values from Tsvetkov et al. (https://link.springer.com/content/pdf/10.1134/S1063773708010039.pdf)
-        #Johnson system
-    tabV = {"O5":-5.6,"O9":-4.5,"B0":-4.0,"B5":-4.2,"A0":0.6,"A5":1.9,"F0":2.7,"F5":3.5,"G0":4.4,"G5":5.1,"K0":5.9,"K5":7.3,"M0":8.8,"M5":12.3}
     #Used tabuled M_V values from:
         #Loktin and Beshenov for O4-B8 (http://ezproxy.lib.utexas.edu/login?url=https://search.ebscohost.com/login.aspx?direct=true&db=a9h&AN=7289091&site=ehost-live)
             #B9 = avg(A0,B8)
@@ -484,7 +515,7 @@ def virial(df):
         #get velocity dispersion at radius
     temp = df[df['radial'] <= radius]
     disp = stat.stdev(temp['radial_velocity'])
-        #estimate cluster mass
+        #estimate cluster mass with virial theorem
     m = radius*disp**2/G * (3/2)
     #convert radius to pc, mass to solar masses
     radius /= m_pc
@@ -494,7 +525,9 @@ def virial(df):
 
 #MS fitting
 def MS_fit(df):
+    #fit to MS
     popt, pcov = curve_fit(zams,df["(BP-RP)_intr"],df['G_rel'],sigma=df['err_G_rel'])
+    #get distance modulus shift
     dMod = popt[0]
     dMod_err = np.sqrt(np.diag(pcov)[0])
     return dMod, dMod_err
@@ -506,6 +539,7 @@ def zams(color,dMod):
 
 #create MS line from hyades cluster
 def getZAMS(df):
+    #do a cubic fit
     a,b,c,d = np.polyfit(df['(BP-RP)_intr'],df['mg_gspphot'],3)
     return a,b,c,d
 

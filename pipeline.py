@@ -29,7 +29,7 @@ def main():
     forceR = True
     #Set to true if you have already done cluster membership on the gaia data (i.e. instead of pm (proper motion) removal)
     didMembership = True
-        #Set z-score for pm exclusion
+        #Set z-score for pm exclusion (also uses trig. parallax)
     z=2
         #Filename with member source IDS (and probabilities), i.e. the membership list
     memName = 'M44Mems.csv'
